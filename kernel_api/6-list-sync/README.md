@@ -68,3 +68,9 @@
     - `after removing expired`: Chỉ phần tử cuối còn lại, vì `count = 10`.
 
 ---
+
+### Tìm kiếm hàm sau khi export
+
+```shell
+grep task_info_remove_expired /proc/kallsyms                                     
+ ```
