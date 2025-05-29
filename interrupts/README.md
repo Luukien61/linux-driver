@@ -543,5 +543,10 @@ if (strncmp(cmd, "clear", 5) == 0)
            ↓
        Trả về size
 ```
-
+```shell
+mknod /dev/kbd c 42 0
+cat /proc/devices
+insmod skels/interrupts/kbd.ko
+cat /dev/kbd
+```
 

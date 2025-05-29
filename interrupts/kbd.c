@@ -254,7 +254,7 @@ static int kbd_init(void)
 	}
 
 	/* TODO 1: request the keyboard I/O ports */
-	/*if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
+	if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
         pr_err("failed to request I8042_DATA_REG\n");
         err = -EBUSY;
         goto out_unregister;
@@ -264,7 +264,7 @@ static int kbd_init(void)
         pr_err("failed to request I8042_STATUS_REG\n");
         err = -EBUSY;
 		goto out_release_data;
-    }*/
+    }
 
 	/* TODO 3: initialize spinlock */
 	spin_lock_init(&devs[0].lock);
