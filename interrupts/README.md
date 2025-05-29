@@ -11,6 +11,8 @@ cat /proc/ioports | grep kbd
 rmmod kbd
 ```
 
+### TODO 1
+
 ```c
 if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
     pr_err("failed to request I8042_DATA_REG\n");
@@ -28,11 +30,8 @@ if (!request_region(I8042_STATUS_REG, 1, MODULE_NAME)) {
 
 ---
 
-## 🧠 Giải thích từng hàm
 
-### 1. `request_region(...)`
-
-#### ✅ Định nghĩa:
+ 1. `request_region(...)`
 
 ```c
 int request_region(unsigned long start, unsigned long n, const char *name);
@@ -42,19 +41,14 @@ int request_region(unsigned long start, unsigned long n, const char *name);
 - **`n`**: Số lượng cổng I/O cần yêu cầu (ở đây là `1`, vì mỗi register là một byte).
 - **`name`**: Tên module hoặc thiết bị (dùng để ghi log).
 
-#### ✅ Mục đích:
+**✅ Mục đích:**
 - Đăng ký quyền truy cập vào một **vùng I/O port** với hệ thống kernel.
 - Giúp đảm bảo rằng không có module nào khác đang sử dụng cùng địa chỉ I/O.
 
 👉 Nếu thành công, bạn được phép đọc/ghi vào các port đó.
 
-#### ❗ Trả về:
-- **Không NULL** nếu thành công.
-- **NULL** nếu đã có ai đó đăng ký trước đó → lỗi `-EBUSY`.
 
----
-
-## ⚠️ Tại sao phải dùng `request_region()`?
+**⚠️ Tại sao phải dùng `request_region()`?**
 
 Trong kernel Linux:
 
@@ -68,9 +62,7 @@ Trong kernel Linux:
 
 ---
 
-## 🔍 1. Tại sao lại cần đăng ký **hai địa chỉ**?
-
-### 🔧 Các địa chỉ I/O:
+**🔍 1. Tại sao lại cần đăng ký hai địa chỉ?**
 
 ```c
 #define I8042_STATUS_REG    0x64  // Trạng thái / lệnh
@@ -87,21 +79,20 @@ Trong kernel Linux:
 
 ---
 
-## ⚠️ 2. Tại sao phải gọi `release_region(I8042_DATA_REG, 1);` khi đăng ký `I8042_STATUS_REG` thất bại?
+**⚠️ 2. Tại sao phải gọi `release_region(I8042_DATA_REG, 1);` khi đăng ký `I8042_STATUS_REG` thất bại?**
 
 
 
-### ✅ Lý do phải gọi `release_region(...)` ở đây:
-
-- Nếu `I8042_DATA_REG` được đăng ký thành công, nhưng `I8042_STATUS_REG` thất bại → bạn đã chiếm giữ một tài nguyên mà không thể hoàn tất việc khởi tạo driver.
-- Để đảm bảo tính toàn vẹn, bạn phải **giải phóng `I8042_DATA_REG` ngay lập tức** để tránh **rò rỉ tài nguyên** (resource leak).
+- Lý do phải gọi `release_region(...)` ở đây:
+    - Nếu `I8042_DATA_REG` được đăng ký thành công, nhưng `I8042_STATUS_REG` thất bại → bạn đã chiếm giữ một tài nguyên mà không thể hoàn tất việc khởi tạo driver.
+    - Để đảm bảo tính toàn vẹn, bạn phải **giải phóng `I8042_DATA_REG` ngay lập tức** để tránh **rò rỉ tài nguyên** (resource leak).
 
 👉 Đây là một kỹ thuật phổ biến trong lập trình kernel:  
 **"Nếu bước sau thất bại, dọn dẹp những gì đã cấp phát trước đó."**
 
 ---
 
-## ❓ Tại sao lại không có `release_region(...)` khi đăng ký `I8042_DATA_REG` thất bại?
+**Tại sao lại không có `release_region(...)` khi đăng ký `I8042_DATA_REG` thất bại?**
 
 Vì:
 - Nếu `I8042_DATA_REG` thất bại ngay từ đầu → bạn chưa đăng ký bất kỳ vùng nào khác.
@@ -268,5 +259,67 @@ cat /proc/interrupts
 ```shell
 make copy
 QEMU_DISPLAY=gtk make boot
+dmesg
 ```
 - Nếu dùng terminal serial (putty/minicom) để nhập lệnh: Sẽ không thấy thông báo ngắt nào trong `dmesg`
+
+## TODO 3
+ 1. `SCANCODE_RELEASED_MASK = 0x80`
+- Đây là **mask bit** để kiểm tra xem **phím đang được nhấn (`press`) hay nhả (`release`)**.
+- Trong giao thức PS/2 (và nhiều loại bàn phím vật lý), khi một phím **được nhả**, giá trị **scancode sẽ có bit 7 (bit cao nhất) là 1**.
+- Bit này thường là **bít dấu hiệu "release"**, tức là:
+  - Nếu bit 7 = 0 → **key pressed**
+  - Nếu bit 7 = 1 → **key released**
+
+Ví dụ:
+
+| Scancode | Hex | Nghĩa         |
+|----------|-----|---------------|
+| 0x01     | 00000001 | Phím A được nhấn |
+| 0x81     | 10000001 | Phím A được nhả |
+
+---
+
+ 2. Hàm `is_key_press(scancode)`
+- Kiểm tra xem `scancode` có phải là **phím được nhấn** không.
+- Dùng phép AND bit: `scancode & 0x80`.
+  - Nếu kết quả khác 0 → là phím **đang được nhả**.
+  - Nếu bằng 0 → là phím **đang được nhấn**.
+- Hàm trả về:
+  - `1` nếu là key press
+  - `0` nếu là key release
+
+---
+
+Hàm `kbd_interrupt_handler` được gọi mỗi khi có **ngắt từ bàn phím xảy ra**, trong cả 2 trường hợp người dùng nhấn/phả phím. Hàm này:
+- Đọc mã quét (scancode) từ controller.
+- Xác định xem phím đang được **nhấn** hay **phả**.
+- Chuyển đổi scancode thành ký tự ASCII.
+- Ghi ký tự vào một **buffer vòng (circular buffer)** nếu đó là ký tự hợp lệ và phím đang được nhấn.
+- `inb(port)` là một hàm hệ thống trong Linux kernel , dùng để đọc 1 byte (8 bit) từ địa chỉ I/O port .
+
+
+**🔄 Flow thực thi**
+
+```text
++-----------------------------+
+|   Ngắt từ bàn phím xảy ra   |
++-----------------------------+
+           ↓
+     Đọc scancode từ port
+           ↓
+       Kiểm tra: có phải key press không?
+           ↓
+      Chuyển sang ký tự ASCII
+           ↓
+         In log debug
+           ↓
+       Nếu là key press & ký tự hợp lệ →
+           ↓
+         Ghi vào buffer với spin_lock
+           ↓
+     Trả về IRQ_NONE
+```
+
+
+
