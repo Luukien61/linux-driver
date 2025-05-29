@@ -3,6 +3,11 @@
 /var/lib/docker/volumes/SO2_DOCKER_VOLUME/_data/tools/labs/skels/interrupts/kbd.c
 ```
 
+### IO access request
+```shell
+insmod skels/interrupts/kbd.ko
+cat /proc/ioports | egrep "(0060|0064)"
+```
 
 ```c
 if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
