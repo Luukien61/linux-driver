@@ -15,7 +15,7 @@ MODULE_AUTHOR("Kernel Hacker");
 MODULE_LICENSE("GPL");
 
 #define MODULE_NAME		"kbd"
-#define INIT		"kien"
+#define INIT		"kien\n"
 
 #define KBD_MAJOR		42
 #define KBD_MINOR		0
