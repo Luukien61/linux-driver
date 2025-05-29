@@ -116,7 +116,9 @@ if (copy_to_user(user_buffer, data->buffer + *offset, to_read)) {
   - `user_buffer`: Địa chỉ nơi người dùng muốn nhận dữ liệu.
   - `data->buffer + *offset`: Bắt đầu đọc từ vị trí offset trong buffer nội bộ.
   - `to_read`: Số byte cần sao chép.
-* Nếu sao chép thất bại → trả về lỗi `-EFAULT` (bad address).
+* hàm trả về
+- 0: nếu sao chép thành công toàn bộ n byte.
+- n (số byte chưa sao chép được): nếu việc sao chép bị lỗi một phần hoặc toàn bộ 
 
 ---
 

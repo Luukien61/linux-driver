@@ -321,55 +321,9 @@ spin_lock_irqsave(&data->lock, flags);
   - Tạm dừng gián đoạn (interrupts) để tránh xung đột với handler ngắt đang thêm dữ liệu.
 - Giữ nguyên tính toàn vẹn dữ liệu khi truy cập chia sẻ giữa nhiều thread/ngắt.
 
----
-
-**Kiểm tra xem có ký tự trong buffer không**
-
-```c
-if (data->count > 0) {
-```
-
-- `data->count` là số lượng ký tự hiện có trong buffer.
-- Chỉ thực hiện nếu có ít nhất một ký tự.
-
----
-
-**Lấy ký tự từ buffer**
-
-```c
-*c = data->buf[data->get_idx];
-```
-
-- `data->buf[]`: Mảng chứa các ký tự đã nhận từ bàn phím.
-- `data->get_idx`: Vị trí đọc tiếp theo.
-- Gán ký tự tại vị trí `get_idx` sang `*c`.
-
----
-
-**Cập nhật chỉ số đọc và số lượng ký tự**
-
-```c
-data->get_idx = (data->get_idx + 1) % BUFFER_SIZE;
-data->count--;
-```
-
-- `get_idx` tăng lên 1 → chuyển đến vị trí đọc tiếp theo.
-- `% BUFFER_SIZE` giúp `get_idx` quay lại đầu buffer khi đạt giới hạn.
-- `count--`: Giảm số lượng ký tự còn lại trong buffer.
-
----
-
-**Đặt `ret = true` nếu thành công**
-
-```c
-ret = true;
-```
-
-- Báo rằng bạn đã đọc được một ký tự.
-
----
-
-**Giải phóng khóa và khôi phục gián đoạn**
+**Vòng `for`
+- thực hiện đọc từng ký tự từ con trỏ data vào mảng, sau mỗi lần đọc 1 ký tự sẽ update index lên 1, giảm count đi 1.
+**Giải phóng khóa và khôi phục gián đoạn sau khi đọc xong**
 
 ```c
 spin_unlock_irqrestore(&data->lock, flags);
@@ -378,8 +332,9 @@ spin_unlock_irqrestore(&data->lock, flags);
 - Mở khóa spinlock.
 - Khôi phục trạng thái gián đoạn trước đó.
 
-
----
+**Hàm `copy_to_user(user_buffer, local_buf, read_bytes)`
+- thực hiện copy dữ liệu từ local_buf sang user space user_buffer. Trả về 0 nếu thành công.
+- vì hàm này không thể được thực hiện khi đang lock nên cần đọc hết dữ liệu rồi mới copy.
 
 **⚠️ 6. Tại sao phải dùng `spin_lock_irqsave()`?**
 
@@ -543,10 +498,26 @@ if (strncmp(cmd, "clear", 5) == 0)
            ↓
        Trả về size
 ```
+```text
+I8042_STATUS_REG = 0x65
+I8042_DATA_REG = 0x61
+
+Nhưng thực tế, I8042 keyboard controller sử dụng:
+
+Status register: 0x64
+Data register: 0x60
+```
+
 ```shell
 mknod /dev/kbd c 42 0
 cat /proc/devices
 insmod skels/interrupts/kbd.ko
 cat /dev/kbd
+echo "clear" > /dev/kbd
+rmmod skels/interrupts/kbd.ko
 ```
 
+**kfifo**
+```shell
+sudo cp interrupts/kbd_kfifo.c /var/lib/docker/volumes/SO2_DOCKER_VOLUME/_data/tools/labs/skels/interrupts/kbd.c
+```

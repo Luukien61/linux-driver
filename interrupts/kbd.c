@@ -8,20 +8,22 @@
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
+#include <linux/slab.h>
 
 MODULE_DESCRIPTION("KBD");
 MODULE_AUTHOR("Kernel Hacker");
 MODULE_LICENSE("GPL");
 
 #define MODULE_NAME		"kbd"
+#define INIT		"kien"
 
 #define KBD_MAJOR		42
 #define KBD_MINOR		0
 #define KBD_NR_MINORS	1
 
 #define I8042_KBD_IRQ		1
-#define I8042_STATUS_REG	0x64
-#define I8042_DATA_REG		0x60
+#define I8042_STATUS_REG	0x65
+#define I8042_DATA_REG		0x61
 
 #define BUFFER_SIZE		1024
 #define SCANCODE_RELEASED_MASK	0x80
@@ -219,7 +221,7 @@ static ssize_t kbd_read(struct file *file,  char __user *user_buffer,
     int err;
 
     while (read < size) {
-        // Get next character (with proper locking)
+        // Get next character (with proper locking in get_char )
         if (!get_char(&c, data))
             break;
 
@@ -245,6 +247,13 @@ static const struct file_operations kbd_fops = {
 static int kbd_init(void)
 {
 	int err;
+
+    const char *init_str = INIT ;
+    size_t init_len = strlen(init_str);
+    memcpy(devs[0].buf, init_str, init_len);
+    devs[0].put_idx = init_len;
+    devs[0].count = init_len;
+    devs[0].get_idx = 0;
 
 	err = register_chrdev_region(MKDEV(KBD_MAJOR, KBD_MINOR),
 				     KBD_NR_MINORS, MODULE_NAME);
