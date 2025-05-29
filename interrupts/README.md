@@ -98,19 +98,13 @@ Vì:
 - Nếu `I8042_DATA_REG` thất bại ngay từ đầu → bạn chưa đăng ký bất kỳ vùng nào khác.
 - Không có gì để giải phóng ⇒ không cần gọi `release_region()`.
 
-
-
 ### TODO 2
 
-## ✅ 1. `request_irq(...)`
+**✅ 1. `request_irq(...)`**
 
-### 🧠 Mục đích:
 
 Hàm này được dùng để **đăng ký handler xử lý gián đoạn** cho một **ngắt cụ thể**, ví dụ như ngắt từ bàn phím (`I8042_KBD_IRQ`).
 
----
-
-### 🔍 Cú pháp:
 
 ```c
 int request_irq(unsigned int irq,
@@ -119,8 +113,6 @@ int request_irq(unsigned int irq,
                 const char *devname,
                 void *dev_id);
 ```
-
-#### Tham số:
 
 | Tham số | Ý nghĩa |
 |---------|----------|
@@ -146,7 +138,7 @@ err = request_irq(I8042_KBD_IRQ, kbd_interrupt_handler, IRQF_SHARED,
 
 ---
 
-## ⚠️ 2. Tại sao phải dùng `IRQF_SHARED`?
+**⚠️ 2. Tại sao phải dùng `IRQF_SHARED`?**
 
 - Nhiều thiết bị có thể chia sẻ cùng một ngắt (ví dụ: PS/2 keyboard và mouse).
 - Khi đó, mỗi driver đều đăng ký handler riêng và ghi nhận `dev_id`.
@@ -154,30 +146,19 @@ err = request_irq(I8042_KBD_IRQ, kbd_interrupt_handler, IRQF_SHARED,
 
 ---
 
-## 🛑 3. `free_irq(...)` là gì?
-
-### 🧠 Mục đích:
+**🛑 3. `free_irq(...)` là gì?**
 
 Hàm này **giải phóng ngắt** mà bạn đã đăng ký trước đó. Thường được gọi trong hàm `module_exit()` để dọn dẹp tài nguyên.
-
----
-
-### 🔍 Cú pháp:
 
 ```c
 void free_irq(unsigned int irq, void *dev_id);
 ```
-
-#### Tham số:
 
 | Tham số | Ý nghĩa |
 |---------|----------|
 | `irq` | Số hiệu ngắt mà bạn đã đăng ký |
 | `dev_id` | Con trỏ bạn đã truyền vào `request_irq(...)`, giúp kernel xác định handler nào cần hủy |
 
----
-
-### ✅ Ví dụ:
 
 ```c
 free_irq(I8042_KBD_IRQ, &devs[0]);
@@ -188,7 +169,7 @@ free_irq(I8042_KBD_IRQ, &devs[0]) chỉ giải phóng ngắt (IRQ) đã được
 
 ---
 
-## 🔄 4. Hàm xử lý gián đoạn: `kbd_interrupt_handler`
+**🔄 4. Hàm xử lý gián đoạn: `kbd_interrupt_handler`**
 
 ```c
 static irqreturn_t kbd_interrupt_handler(int irq, void *dev_id)
@@ -200,15 +181,12 @@ static irqreturn_t kbd_interrupt_handler(int irq, void *dev_id)
 
 ---
 
-### 🔍 Giải thích chi tiết:
+**🔍 Giải thích chi tiết:**
 
 - `irq`: Số hiệu ngắt đã xảy ra.
 - `dev_id`: Con trỏ bạn truyền vào khi gọi `request_irq(...)`.
 - `pr_info(...)`: Ghi log vào kernel message.
 
----
-
-### 📌 Trả về giá trị:
 
 | Giá trị trả về | Ý nghĩa |
 |----------------|---------|
@@ -223,7 +201,7 @@ Nếu **đã xử lý ngắt**, hãy trả về `IRQ_HANDLED`.
 
 ---
 
-## 🧩 5. Flow tổng quát
+**🧩 5. Flow tổng quát**
 
 ```text
 +----------------------------+
@@ -254,7 +232,7 @@ Nếu **đã xử lý ngắt**, hãy trả về `IRQ_HANDLED`.
 cat /proc/interrupts
 ```
 
-### Lưu ý
+**Lưu ý**
 - To get access to the keyboard on the virtual machine boot with:
 ```shell
 make copy
@@ -263,7 +241,7 @@ dmesg
 ```
 - Nếu dùng terminal serial (putty/minicom) để nhập lệnh: Sẽ không thấy thông báo ngắt nào trong `dmesg`
 
-## TODO 3
+### TODO 3
  1. `SCANCODE_RELEASED_MASK = 0x80`
 - Đây là **mask bit** để kiểm tra xem **phím đang được nhấn (`press`) hay nhả (`release`)**.
 - Trong giao thức PS/2 (và nhiều loại bàn phím vật lý), khi một phím **được nhả**, giá trị **scancode sẽ có bit 7 (bit cao nhất) là 1**.
@@ -321,5 +299,249 @@ Hàm `kbd_interrupt_handler` được gọi mỗi khi có **ngắt từ bàn ph�
      Trả về IRQ_NONE
 ```
 
+
+
+
+
+### TODO 4
+
+- `flags`: Dùng để lưu trạng thái gián đoạn khi tắt gián đoạn (`spin_lock_irqsave(...)`)
+- `ret`: Biến trả về, ban đầu là `false` (nghĩa là chưa lấy được ký tự nào)
+
+---
+
+**Tắt gián đoạn và khóa buffer**
+
+```c
+spin_lock_irqsave(&data->lock, flags);
+```
+
+- `spin_lock_irqsave(...)`:
+  - Khóa spinlock.
+  - Tạm dừng gián đoạn (interrupts) để tránh xung đột với handler ngắt đang thêm dữ liệu.
+- Giữ nguyên tính toàn vẹn dữ liệu khi truy cập chia sẻ giữa nhiều thread/ngắt.
+
+---
+
+**Kiểm tra xem có ký tự trong buffer không**
+
+```c
+if (data->count > 0) {
+```
+
+- `data->count` là số lượng ký tự hiện có trong buffer.
+- Chỉ thực hiện nếu có ít nhất một ký tự.
+
+---
+
+**Lấy ký tự từ buffer**
+
+```c
+*c = data->buf[data->get_idx];
+```
+
+- `data->buf[]`: Mảng chứa các ký tự đã nhận từ bàn phím.
+- `data->get_idx`: Vị trí đọc tiếp theo.
+- Gán ký tự tại vị trí `get_idx` sang `*c`.
+
+---
+
+**Cập nhật chỉ số đọc và số lượng ký tự**
+
+```c
+data->get_idx = (data->get_idx + 1) % BUFFER_SIZE;
+data->count--;
+```
+
+- `get_idx` tăng lên 1 → chuyển đến vị trí đọc tiếp theo.
+- `% BUFFER_SIZE` giúp `get_idx` quay lại đầu buffer khi đạt giới hạn.
+- `count--`: Giảm số lượng ký tự còn lại trong buffer.
+
+---
+
+**Đặt `ret = true` nếu thành công**
+
+```c
+ret = true;
+```
+
+- Báo rằng bạn đã đọc được một ký tự.
+
+---
+
+**Giải phóng khóa và khôi phục gián đoạn**
+
+```c
+spin_unlock_irqrestore(&data->lock, flags);
+```
+
+- Mở khóa spinlock.
+- Khôi phục trạng thái gián đoạn trước đó.
+
+
+---
+
+**⚠️ 6. Tại sao phải dùng `spin_lock_irqsave()`?**
+
+- Vì buffer có thể bị **viết đồng thời** bởi handler ngắt.
+- Bạn cần đảm bảo **truy cập độc quyền** đến buffer.
+- `spin_lock_irqsave(...)` vừa khóa buffer, vừa tắt gián đoạn → an toàn cho vùng mã tới hạn (critical section).
+
+---
+
+**🎯 10. Tại sao phải dùng buffer vòng?**
+
+- Để **giữ lại lịch sử input** từ bàn phím.
+- Cho phép ứng dụng đọc ký tự **không trực tiếp từ handler ngắt**.
+- Buffer vòng giúp **tối ưu bộ nhớ** và dễ quản lý hơn so với mảng cố định.
+
+
+
+Hàm `spin_lock_irqsave(&data->lock, flags);` thực hiện hai việc rất quan trọng trong môi trường kernel (nhân Linux), đặc biệt khi làm việc với **driver** hoặc **critical section (vùng quan trọng)**:
+
+---
+
+**Ý nghĩa của `spin_lock_irqsave(&lock, flags)`**
+
+1. **Khoá spinlock (`data->lock`)** để đảm bảo chỉ một CPU hoặc một luồng trong kernel truy cập vào tài nguyên tại một thời điểm → giúp tránh race condition (điều kiện tranh chấp).
+2. **Tắt local interrupt (IRQ)** và lưu cờ trạng thái IRQ hiện tại vào biến `flags`. Việc tắt IRQ đảm bảo rằng ngắt sẽ không làm gián đoạn vùng đang được bảo vệ bởi spinlock.
+
+---
+
+**🔄 Khi nào dùng `spin_lock_irqsave` thay vì `spin_lock`?**
+
+* Khi **vùng bảo vệ có thể bị gián đoạn bởi ngắt**, ví dụ: bạn đang ở trong ngữ cảnh có thể bị ngắt (interruptible context).
+* Nếu không tắt IRQ, một **interrupt handler** có thể cũng cố gắng lấy cùng spinlock đó, gây **deadlock (treo vĩnh viễn)**.
+---
+
+* `flags` là biến `unsigned long` dùng để lưu trạng thái IRQ trước khi bị tắt.
+* Sau khi xong việc với tài nguyên được bảo vệ, bạn cần gọi:
+
+```c
+spin_unlock_irqrestore(&data->lock, flags);
+```
+
+Để:
+
+* **Giải phóng spinlock**
+* **Khôi phục trạng thái IRQ** trước đó.
+
+---
+
+| Hàm                      | Chức năng                                     |
+| ------------------------ | --------------------------------------------- |
+| `spin_lock_irqsave`      | Khoá spinlock và tắt ngắt, lưu trạng thái IRQ |
+| `spin_unlock_irqrestore` | Mở khoá và khôi phục trạng thái IRQ trước đó  |
+
+**To test**
+```shell
+mknod /dev/kbd c 42 0
+cat /dev/kbd
+```
+- Lệnh `cat /dev/kbd` sẽ thực hiện:
+ - Gọi `open("/dev/kbd", O_RDONLY)` → kernel gọi `kbd_open()`
+
+### TODO 5
+
+```shell
+mknod /dev/kbd c 42 0
+cat /dev/kbd
+echo "clear" > /dev/kbd
+```
+
+```c
+static void reset_buffer(struct kbd *data)
+{
+    unsigned long flags;
+
+    spin_lock_irqsave(&data->lock, flags);
+
+    data->put_idx = 0;
+    data->get_idx = 0;
+    data->count = 0;
+
+    spin_unlock_irqrestore(&data->lock, flags);
+}
+```
+
+| Dòng | Giải thích |
+|------|------------|
+| `unsigned long flags;` | Biến lưu trữ trạng thái gián đoạn trước khi tắt |
+| `spin_lock_irqsave(...)` | Khóa spinlock và tắt gián đoạn để đảm bảo an toàn cho vùng mã tới hạn |
+| `data->put_idx = 0;` | Đặt lại chỉ số viết về vị trí bắt đầu của buffer |
+| `data->get_idx = 0;` | Đặt lại chỉ số đọc về vị trí bắt đầu của buffer |
+| `data->count = 0;` | Xóa đếm số lượng ký tự đang có trong buffer |
+| `spin_unlock_irqrestore(...)` | Mở khóa spinlock và khôi phục trạng thái gián đoạn |
+
+👉 Kết quả: Buffer được "làm sạch", như mới khởi tạo.
+
+---
+
+**📌 2. Hàm `kbd_write(...)`**
+
+
+**Lấy dữ liệu thiết bị từ `file->private_data`**
+
+
+- `file->private_data` là con trỏ đã được gán trong hàm `open()`.
+- nó trỏ đến cấu trúc `struct kbd`, chứa buffer và các biến liên quan.
+
+
+```c
+if (size < 5)
+    return -EINVAL;
+```
+
+- Chỉ chấp nhận lệnh có ít nhất 5 byte → vì `"clear"` có 5 ký tự.
+- Nếu nhỏ hơn 5 → trả về lỗi `-EINVAL`.
+
+**Sao chép lệnh từ không gian người dùng**
+
+```c
+err = copy_from_user(cmd, user_buffer, size);
+```
+
+- `copy_from_user(...)` là hàm an toàn để sao chép dữ liệu từ không gian người dùng sang kernel.
+- Nếu có lỗi (ví dụ địa chỉ không hợp lệ), trả về `-EFAULT`.
+
+**Thêm ký tự kết thúc chuỗi**
+-` echo "clear"` gửi 6 bytes (bao gồm cả ký tự newline `\n`). 
+
+```c
+cmd[size-1] = '\0';
+```
+
+- `cmd` có kích thước 6 byte → `cmd[5]` là vị trí cuối cùng.
+- Gán `\0` để biến `cmd` trở thành một **chuỗi null-terminated string**.
+
+**So sánh với lệnh `"clear"`**
+
+```c
+if (strncmp(cmd, "clear", 5) == 0)
+```
+
+- Kiểm tra xem người dùng có gửi lệnh `"clear"` hay không.
+- Nếu có → gọi `reset_buffer(data);` để xóa buffer.
+- `return size`: Điều này báo cho kernel rằng tất cả dữ liệu đã được xử lý thành công
+
+```text
++----------------------------+
+|   Người dùng gọi write(...)|
++----------------------------+
+           ↓
+      Kiểm tra size >= 5?
+         ┌─── No → return -EINVAL
+         ↓ Yes
+     Sao chép 5 byte từ user
+           ↓
+       Gán \0 vào cmd[5]
+           ↓
+      So sánh với "clear"
+         ┌─── No → return -EINVAL
+         ↓ Yes
+     Gọi reset_buffer()
+           ↓
+       Trả về size
+```
 
 

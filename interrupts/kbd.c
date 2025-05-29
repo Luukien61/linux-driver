@@ -20,8 +20,8 @@ MODULE_LICENSE("GPL");
 #define KBD_NR_MINORS	1
 
 #define I8042_KBD_IRQ		1
-#define I8042_STATUS_REG	0x65
-#define I8042_DATA_REG		0x61
+#define I8042_STATUS_REG	0x64
+#define I8042_DATA_REG		0x60
 
 #define BUFFER_SIZE		1024
 #define SCANCODE_RELEASED_MASK	0x80
@@ -83,12 +83,37 @@ static void put_char(struct kbd *data, char c)
 static bool get_char(char *c, struct kbd *data)
 {
 	/* TODO 4: get char from buffer; update count and get_idx */
-	return false;
+    unsigned long flags;
+    bool ret = false;
+
+    // Disable interrupts and acquire spinlock
+    spin_lock_irqsave(&data->lock, flags);
+
+    if (data->count > 0) {
+        *c = data->buf[data->get_idx];
+        data->get_idx = (data->get_idx + 1) % BUFFER_SIZE;
+        data->count--;
+        ret = true;
+    }
+
+    // Release lock and restore interrupts
+    spin_unlock_irqrestore(&data->lock, flags);
+
+    return ret;
 }
 
 static void reset_buffer(struct kbd *data)
 {
-	/* TODO 5: reset count, put_idx, get_idx */
+    unsigned long flags;
+
+    spin_lock_irqsave(&data->lock, flags);
+
+    data->put_idx = 0;
+    data->get_idx = 0;
+    data->count = 0;
+
+    // Release lock and restore interrupts
+    spin_unlock_irqrestore(&data->lock, flags);
 }
 
 /*
@@ -102,7 +127,7 @@ static inline u8 i8042_read_data(void)
 	return val;
 }
 
-/* TODO 2: implement interrupt handler */
+	/* TODO 2: implement interrupt handler */
 	/* TODO 3: read the scancode */
 	/* TODO 3: interpret the scancode */
 	/* TODO 3: display information about the keystrokes */
@@ -155,12 +180,56 @@ static int kbd_release(struct inode *inode, struct file *file)
 
 /* TODO 5: add write operation and reset the buffer */
 
+static ssize_t kbd_write(struct file *file, const char __user *user_buffer,
+                         size_t size, loff_t *offset)
+{
+    struct kbd *data = (struct kbd *)file->private_data;
+    char cmd[size];
+    int err;
+
+    //only care about the "clear" command
+    if (size < 5)
+        return -EINVAL;
+
+    // Copy user data
+    err = copy_from_user(cmd, user_buffer, size);
+    if (err)
+        return -EFAULT;
+
+    // Remove trailing newline if present
+    if (size > 0 && cmd[size-1] == '\n')
+        cmd[size-1] = '\0';
+
+    if (strncmp(cmd, "clear", 5) == 0) {
+        reset_buffer(data);
+        pr_info("Buffer cleared\n");
+        return size;
+    }
+
+    return -EINVAL;
+}
+
 static ssize_t kbd_read(struct file *file,  char __user *user_buffer,
 			size_t size, loff_t *offset)
 {
 	struct kbd *data = (struct kbd *) file->private_data;
 	size_t read = 0;
 	/* TODO 4: read data from buffer */
+    char c;
+    int err;
+
+    while (read < size) {
+        // Get next character (with proper locking)
+        if (!get_char(&c, data))
+            break;
+
+        // Copy to userspace
+        err = put_user(c, user_buffer + read);
+        if (err)
+            return -EFAULT;
+
+        read++;
+    }
 	return read;
 }
 
@@ -169,6 +238,7 @@ static const struct file_operations kbd_fops = {
 	.open = kbd_open,
 	.release = kbd_release,
 	.read = kbd_read,
+	.write = kbd_write,
 	/* TODO 5: add write operation */
 };
 
@@ -184,7 +254,7 @@ static int kbd_init(void)
 	}
 
 	/* TODO 1: request the keyboard I/O ports */
-	if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
+	/*if (!request_region(I8042_DATA_REG, 1, MODULE_NAME)) {
         pr_err("failed to request I8042_DATA_REG\n");
         err = -EBUSY;
         goto out_unregister;
@@ -194,7 +264,7 @@ static int kbd_init(void)
         pr_err("failed to request I8042_STATUS_REG\n");
         err = -EBUSY;
 		goto out_release_data;
-    }
+    }*/
 
 	/* TODO 3: initialize spinlock */
 	spin_lock_init(&devs[0].lock);
