@@ -360,7 +360,15 @@ Khi không có `reg`:
    // res sẽ là NULL vì không có reg property
    ```
 
----
+## In order to rebuild the kernel with a new `imx6ul.dtsi` file:
+```shell
+# modules build
+tools/labs $ ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- make build
+# modules copy
+tools/labs $ ARCH=arm make copy
+# kernel build
+/linux $ ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- make -j8
+```
 
 
 
