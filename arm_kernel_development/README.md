@@ -1,3 +1,8 @@
+```text
+ /var/lib/docker/volumes/SO2_DOCKER_VOLUME_ARM/_data/tools/labs/qemu/Makefile
+```
+
+
 
 #### 1. **compatible = "arm,cortex-a7";**
 - **Ý nghĩa**: Xác định rằng CPU này là một lõi **ARM Cortex-A7**. Thuộc tính `compatible` giúp kernel Linux nhận diện loại CPU để tải driver hoặc module phù hợp.

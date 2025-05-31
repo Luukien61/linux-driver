@@ -23,20 +23,23 @@ cd qemu
 # Cài đặt Python 3.12 và các công cụ cần thiết
 sudo add-apt-repository ppa:deadsnakes/ppa -y
 sudo apt update -y
-sudo apt install python3.12 python3.12-venv meson ninja-build -y
-python3.12 -m ensurepip --upgrade
-python3.12 -m pip install --upgrade pip
-python3.12 -m pip install tomli
+sudo apt install python3.10 python3.10-venv meson ninja-build -y
+python3.10 -m ensurepip --upgrade
+python3.10 -m pip install --upgrade pip
+python3.10 -m pip install tomli
+sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+sudo update-alternatives --config python3
+# grep -rl '/usr/bin/python3.12' ~/.local/bin /usr/local/bin 2>/dev/null
 
 # Cài đặt GLib 2.78
 if [ ! -f glib-2.78.0.tar.xz ]; then
-    wget https://download.gnome.org/sources/glib/2.78.0/glib-2.78.0.tar.xz
+    wget https://download.gnome.org/sources/glib/2.78/glib-2.78.0.tar.xz
 fi
 if [ ! -d glib-2.78.0 ]; then
     tar -xf glib-2.78.0.tar.xz
 fi
 cd glib-2.78.0
-pip install --user --upgrade meson
+pip3.10 install --user --upgrade meson
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 meson setup builddir

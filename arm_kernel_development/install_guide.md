@@ -21,7 +21,7 @@ sudo apt install meson ninja-build
 wget https://download.gnome.org/sources/glib/2.78/glib-2.78.0.tar.xz
 tar -xf glib-2.78.0.tar.xz
 cd glib-2.78.0
-pip install --user --upgrade meson
+pip3.10 install --user --upgrade meson
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 meson setup builddir

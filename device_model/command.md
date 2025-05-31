@@ -29,6 +29,7 @@ cat /sys/bus/bex/devices/device1/misc/bex-misc-1/dev
 mknod /dev/bex-device1 c <major> <minor>
 
 echo "Hello from userspace" > /dev/bex-device1
+echo "Hello from userspace" > /dev/bex-misc-1
 
 cat /dev/bex-device1
 
