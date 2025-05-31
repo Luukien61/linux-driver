@@ -15,46 +15,46 @@ MODULE_AUTHOR("SO2");
 MODULE_LICENSE("GPL");
 
 static const struct of_device_id simple_device_ids[] = {
-    { .compatible = "so2,simple-device-v1" },
-    { .compatible = "so2,simple-device-v2" },
-    { /* sentinel */ }
+	/* TODO 2: Add compatible strings */
+	{ /* sentinel */}
 };
 
 static int simple_probe(struct platform_device *pdev)
 {
-    pr_info("simple_probe() %pOF\n", pdev->dev.of_node);
+	pr_info("simple_probe() %pOF\n", pdev->dev.of_node);
 
-    return 0;
+	return 0;
 }
 
 static int simple_remove(struct platform_device *pdev)
 {
-    pr_info("simple_remove()\n");
+	pr_info("simple_remove()\n");
 
-    return 0;
+	return 0;
 }
 
 struct platform_driver simple_driver = {
-    .probe	= simple_probe,
-    .remove	= simple_remove,
-    .driver = {
-        .name = "simple_driver",
-        .of_match_table = simple_device_ids,
-    },
+	.probe	= simple_probe,
+	.remove	= simple_remove,
+	.driver = {
+		.name = "simple_driver",
+		.of_match_table = simple_device_ids,
+	},
 };
 
 static int simple_init(void)
 {
-    pr_info("Simple driver init!\n");
-
-    return platform_driver_register(&simple_driver); // Đăng ký driver với kernel
+	pr_info("Simple driver init!\n");
+	
+	/* TODO 1: Notice simple_driver definition */
+	return platform_driver_register(&simple_driver);
 }
 
 static void simple_exit(void)
 {
-    pr_info("Simple driver exit\n");
+	pr_info("Simple driver exit\n");
 
-    platform_driver_unregister(&simple_driver);
+	platform_driver_unregister(&simple_driver);
 }
 
 module_init(simple_init);
