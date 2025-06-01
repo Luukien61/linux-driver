@@ -28,7 +28,7 @@
     nodev   smb3
     minfs           ```Mong đợi thấy```
 
-## Thử mount: (chưa mount được vì chưa là TODO 2)
+## Thử mount: (chưa mount được vì chưa làm TODO 2)
     root@qemux86:~/skels/filesystems/minfs/kernel# mkdir -p /mnt/minfs
     root@qemux86:~/skels/filesystems/minfs/kernel# mount -t minfs /dev/vdc /mnt/minf
     s
