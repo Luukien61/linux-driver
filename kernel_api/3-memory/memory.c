@@ -29,7 +29,7 @@ static struct task_info *task_info_alloc(int pid)
 		return NULL;
 
 	ti->pid = pid;
-	ti->timestamp = jiffies;
+	ti->timestamp = jiffies; // số s từ khi hệ thống khởi động
 
 	return ti;
 }
@@ -39,14 +39,14 @@ static int memory_init(void)
 	struct task_struct *next_task_ptr, *next_next_task_ptr;
 
 	/* TODO 2: call task_info_alloc for current pid */
-	ti1 = task_info_alloc(current->pid);
+	ti1 = task_info_alloc(current->pid); // Đây là một macro trong kernel Linux, trả về con trỏ tới cấu trúc `task_struct` của tiến trình hiện tại (tiến trình đang thực thi module này).
 	if (!ti1) {
 		printk(KERN_ERR "Failed to allocate ti1\n");
 		return -ENOMEM;
 	}
 
 	/* TODO 2: call task_info_alloc for parent PID */
-	ti2 = task_info_alloc(current->parent->pid);
+	ti2 = task_info_alloc(current->parent->pid); // when imsmod or run in a terminal(bash), the shell process will be the parent
 	if (!ti2) {
 		printk(KERN_ERR "Failed to allocate ti2\n");
 		kfree(ti1);
@@ -55,7 +55,7 @@ static int memory_init(void)
 
 	/* TODO 2: call task_info alloc for next process PID */
 	next_task_ptr = next_task(current);
-	ti3 = task_info_alloc(next_task_ptr->pid);
+	ti3 = task_info_alloc(next_task_ptr->pid); // pid 0 for idle process
 	if (!ti3) {
 		printk(KERN_ERR "Failed to allocate ti3\n");
 		kfree(ti1);
@@ -65,7 +65,7 @@ static int memory_init(void)
 
 	/* TODO 2: call task_info_alloc for next process of the next process */
 	next_next_task_ptr = next_task(next_task_ptr);
-	ti4 = task_info_alloc(next_next_task_ptr->pid);
+	ti4 = task_info_alloc(next_next_task_ptr->pid); // pid is 1 , init task, it's understandable because the task list is Traversal (vòng). so when insmmod may be the last task of the list, the next one is idle and the next one is init
 	if (!ti4) {
 		printk(KERN_ERR "Failed to allocate ti4\n");
 		kfree(ti1);

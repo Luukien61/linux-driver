@@ -122,8 +122,8 @@ static int list_full_init(void)
 	task_info_add_for_current();
 	task_info_print_list("after first add");
 
-	set_current_state(TASK_INTERRUPTIBLE);
-	schedule_timeout(5 * HZ);
+	//set_current_state(TASK_INTERRUPTIBLE);
+	//schedule_timeout(5 * HZ);
 
 	return 0;
 }
@@ -143,3 +143,4 @@ static void list_full_exit(void)
 
 module_init(list_full_init);
 module_exit(list_full_exit);
+// rmmod skels/kernel_api/5-list-full/list-full.ko

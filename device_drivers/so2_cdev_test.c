@@ -49,7 +49,7 @@ static void usage(const char *argv0)
 
 int main(int argc, char **argv)
 {
-	int fd;
+	int fd; // Stands for file descriptor, an integer that uniquely identifies an open file or device in a process’s context.
 	char buffer[BUFFER_SIZE];
 
 	if (argc < 2)

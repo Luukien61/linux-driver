@@ -22,8 +22,8 @@ MODULE_LICENSE("GPL");
 #define KBD_NR_MINORS	1
 
 #define I8042_KBD_IRQ		1
-#define I8042_STATUS_REG	0x65
-#define I8042_DATA_REG		0x61
+#define I8042_STATUS_REG	0x64
+#define I8042_DATA_REG		0x60
 
 #define BUFFER_SIZE		1024
 #define SCANCODE_RELEASED_MASK	0x80
@@ -279,7 +279,7 @@ static int kbd_init(void)
 	spin_lock_init(&devs[0].lock);
 
 	/* TODO 2: Register IRQ handler for keyboard IRQ (IRQ 1). */
-	err = request_irq(I8042_KBD_IRQ, kbd_interrupt_handler, IRQF_SHARED,
+	err = request_irq(I8042_KBD_IRQ, kbd_interrupt_handler, IRQF_SHARED, //register interrupt handler with kernel
 			  MODULE_NAME, &devs[0]);
 	if (err) {
 		pr_err("request_irq failed for IRQ %d: %d\n", I8042_KBD_IRQ, err);
@@ -287,7 +287,7 @@ static int kbd_init(void)
 	}
 
 	cdev_init(&devs[0].cdev, &kbd_fops);
-	cdev_add(&devs[0].cdev, MKDEV(KBD_MAJOR, KBD_MINOR), 1);
+	cdev_add(&devs[0].cdev, MKDEV(KBD_MAJOR, KBD_MINOR), 1); // Registers the initialized struct cdev with the kernel, making the character device accessible to user-space via a device file
 
 	pr_notice("Driver %s loaded\n", MODULE_NAME);
 	return 0;

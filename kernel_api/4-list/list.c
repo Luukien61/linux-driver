@@ -65,7 +65,7 @@ static void task_info_print_list(const char *msg)
 
     pr_info("%s: [ ", msg);
     list_for_each(p, &head) {
-        ti = list_entry(p, struct task_info, list);
+        ti = list_entry(p, struct task_info, list); // Chuyển con trỏ p (trỏ tới list_head) thành con trỏ tới task_info bằng cách sử dụng trường list trong cấu trúc.
         pr_info("(%d, %lu) ", ti->pid, ti->timestamp);
     }
     pr_info("]\n");
@@ -73,7 +73,7 @@ static void task_info_print_list(const char *msg)
 
 static void task_info_purge_list(void)
 {
-    struct list_head *p, *q;
+    struct list_head *p, *q; // - p: Con trỏ hiện tại đang duyệt. q: Con trỏ tạm thời lưu trữ vị trí tiếp theo, để tránh bị xóa khi đang duyệt.
     struct task_info *ti;
 
     /* TODO 2: Iterate over the list and delete all elements */
