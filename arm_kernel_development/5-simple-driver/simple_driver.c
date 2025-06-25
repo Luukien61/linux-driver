@@ -15,8 +15,10 @@ MODULE_AUTHOR("SO2");
 MODULE_LICENSE("GPL");
 
 static const struct of_device_id simple_device_ids[] = {
+    /* TODO 2: Add compatible strings */
     { .compatible = "so2,simple-device-v1" },
     { .compatible = "so2,simple-device-v2" },
+    // Kernel sẽ so khớp các nút trong Device Tree có `compatible` giống với một trong hai giá trị này thì sẽ gọi `probe` của driver.
     { /* sentinel */ }
 };
 
@@ -46,6 +48,7 @@ struct platform_driver simple_driver = {
 static int simple_init(void)
 {
     pr_info("Simple driver init!\n");
+    /* TODO 1: Notice simple_driver definition */
 
     return platform_driver_register(&simple_driver); // Đăng ký driver với kernel
 }

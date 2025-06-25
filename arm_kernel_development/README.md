@@ -2,12 +2,73 @@
  /var/lib/docker/volumes/SO2_DOCKER_VOLUME_ARM/_data/tools/labs/qemu/Makefile
 ```
 
+```shell
+ls arch/arm/boot/dts/
+./qemu/build/qemu-system-arm -M ?
 
+```
+
+```text
+.dtsi (Device Tree Source Include):
+
+File "gốc" chứa các thiết lập phần cứng chung (ví dụ: cấu hình CPU, bộ nhớ, ngoại vi cơ bản).
+
+Giống như file header (.h) trong lập trình, được include vào các file khác.
+
+.dts (Device Tree Source):
+
+File mô tả riêng cho board imx6ul-14x14-evk, kế thừa từ .dtsi.
+
+Thêm/sửa các thiết lập phần cứng cụ thể (ví dụ: LED, nút bấm, kết nối trên board này).
+
+.dtb (Device Tree Blob):
+
+File nhị phân sinh ra khi biên dịch từ .dts + .dtsi.
+
+Device Tree (hay Device Tree Blob - DTB) là một cấu trúc dữ liệu mô tả phần cứng của hệ thống nhúng (ARM, MIPS, PowerPC, ...) 
+
+File nguồn: .dts (Device Tree Source) hoặc .dtsi (Include).
+
+File nhị phân sau biên dịch: .dtb (Device Tree Blob).
+
+Kernel Linux đọc file này để biết cách giao tiếp với phần cứng.
+
+Khi chạy Linux trên board imx6ul-14x14-evk (hoặc Raspberry Pi, Beaglebone...), kernel sẽ đọc file .dtb 
+để biết cách điều khiển phần cứng (CPU, GPIO, I2C, USB...).
+```
+
+```text
+QEMU không mô phỏng chính xác tất cả các tính năng phần cứng của i.MX6UL, đặc biệt là các cơ chế DVFS phức tạp.
+Trong mô phỏng imx6ul-evk hoặc imx6ul-14x14-evk, QEMU có thể chỉ hỗ trợ một tập hợp giới hạn các tần số CPU, 
+và 528 MHz có thể được chọn làm tần số tối đa mặc định để đơn giản hóa mô phỏng.
+Trong QEMU, mô phỏng có thể được thiết kế để phản ánh cấu hình phổ biến nhất (528 MHz) thay vì hỗ trợ toàn bộ dải tần số.
+```
+```shell
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
+
+ls /sys/bus/platform/devices/900000.sram/driver
+
+```
+```text
+Địa chỉ bắt đầu: 0x00900000 , SRAM là vùng nhớ riêng biệt, không nằm trong memory (DRAM chính)
+
+Địa chỉ kết thúc: 0x0091ffff
+
+Kích thước: 0x0091ffff - 0x00900000 + 1 = 0x20000 (128KB)
+
+900000.sram: Tên driver quản lý vùng nhớ này (thường là driver SRAM của kernel).
+
+sram@900000: Tên node trong Device Tree mô tả vùng SRAM này.
+```
+
+- imx6ul-14x14-evk.dtb : Định dạng: Đây là tệp Device Tree Blob (DTB), 
+dạng nhị phân được biên dịch từ tệp imx6ul-14x14-evk.dts bằng công cụ Device Tree Compiler (dtc)
+Được bootloader (như U-Boot) tải và truyền cho kernel Linux khi khởi động để cung cấp thông tin cấu hình phần cứng.
 
 #### 1. **compatible = "arm,cortex-a7";**
 - **Ý nghĩa**: Xác định rằng CPU này là một lõi **ARM Cortex-A7**. Thuộc tính `compatible` giúp kernel Linux nhận diện loại CPU để tải driver hoặc module phù hợp.
 - **Ứng dụng**: Kernel sẽ sử dụng thông tin này để cấu hình CPU, đảm bảo tương thích với kiến trúc ARMv7-A.
-
+- Cortex-A7 sử dụng kiến trúc ARMv7-A, là kiến trúc 32-bit
 #### 2. **device_type = "cpu";**
 - **Ý nghĩa**: Chỉ định rằng node này mô tả một CPU. Đây là thuộc tính bắt buộc cho các node trong khối `cpus` để kernel nhận diện thiết bị là một bộ xử lý.
 
@@ -198,7 +259,17 @@ gpio1: gpio@209c000 {
                   <&iomuxc 16 33 16>;
 };
 ```
+```text
+Chân đa năng có thể cấu hình thành ngõ vào hoặc ngõ ra tín hiệu số.
 
+Công dụng:
+
+Điều khiển LED, nút nhấn.
+
+Giao tiếp với cảm biến đơn giản (ví dụ: DHT11).
+
+Tạo xung PWM (điều khiển servo, motor).
+```
 #### **Giải thích**:
 - Thuộc tính `reg` mô tả vùng I/O space cho thiết bị GPIO:
     - `0x0209c000`: Địa chỉ bắt đầu của vùng I/O.
@@ -223,6 +294,17 @@ i2c1: i2c@21a0000 {
     status = "disabled";
 };
 ```
+```text
+Giao tiếp nối tiếp tốc độ thấp, 2 dây (SCL + SDA).
+
+Công dụng:
+
+Kết nối cảm biến (ví dụ: nhiệt độ LM75).
+
+Giao tiếp với màn hình OLED, EEPROM.
+
+Đọc/ghi dữ liệu từ IC ngoại vi.
+```
 
 #### **Giải thích**:
 - Thuộc tính `reg` mô tả vùng I/O space cho thiết bị I2C:
@@ -242,3 +324,9 @@ i2c1: i2c@21a0000 {
 3. **Kích thước của I/O space cho thiết bị I2C (`i2c1`)**: **16 KB**.
 
 
+```shell
+sudo find /var/lib/docker/volumes/SO2_DOCKER_VOLUME_ARM/_data -name imx6ul.dtsi 
+sudo cp arm_kernel_development/5-simple-driver/imx6ul.dtsi /var/lib/docker/volumes/SO2_DOCKER_VOLUME_ARM/_data/arch/arm/boot/dts/imx6ul.dtsi
+/linux: ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- make -j8
+ls -R /sys/firmware/devicetree/base/
+```

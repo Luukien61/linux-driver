@@ -20,7 +20,7 @@ struct mailbox_dev {
     struct cdev cdev;
     struct device *device;
     int minor;
-    bool is_open;
+    int open_count;
     struct mutex open_mutex;
 };
 
@@ -64,22 +64,17 @@ static int mailbox_open(struct inode *inode, struct file *file)
 
     dev = &mailbox_devices[minor];
 
-    // Lock để kiểm tra và set trạng thái open
+    // Lock device để tăng open count
     if (mutex_lock_interruptible(&dev->open_mutex)) {
         return -ERESTARTSYS;
     }
 
-    if (dev->is_open) {
-        mutex_unlock(&dev->open_mutex);
-        printk(KERN_WARNING "Mailbox: Device %d already open\n", minor);
-        return -EBUSY;
-    }
-
-    dev->is_open = true;
+    dev->open_count++;
     file->private_data = dev;
+
     mutex_unlock(&dev->open_mutex);
 
-    printk(KERN_INFO "Mailbox: Device %d opened successfully\n", minor);
+    printk(KERN_INFO "Mailbox: Device %d opened successfully (count: %d)\n", minor, dev->open_count);
     return 0;
 }
 
@@ -88,10 +83,11 @@ static int mailbox_release(struct inode *inode, struct file *file)
     struct mailbox_dev *dev = file->private_data;
 
     mutex_lock(&dev->open_mutex);
-    dev->is_open = false;
+    dev->open_count--;
+
     mutex_unlock(&dev->open_mutex);
 
-    printk(KERN_INFO "Mailbox: Device %d closed\n", dev->minor);
+    printk(KERN_INFO "Mailbox: Device %d closed (remaining count: %d)\n", dev->minor, dev->open_count);
     return 0;
 }
 
@@ -99,43 +95,72 @@ static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, 
 {
     int ret;
     unsigned int copied;
+    size_t total_copied = 0;
+    size_t remaining = len;
 
     if (len == 0) {
         return 0;
     }
 
-    // Chờ cho đến khi có dữ liệu trong FIFO
-    while (kfifo_is_empty(&shared_mailbox->fifo)) {
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
+    // Đọc cho đến khi có đủ len bytes hoặc bị interrupt
+    while (total_copied < len) {
+        // Chờ cho đến khi có dữ liệu trong FIFO
+        while (kfifo_is_empty(&shared_mailbox->fifo)) {
+            if (file->f_flags & O_NONBLOCK) {
+                // Nếu đã đọc được một phần, trả về số bytes đã đọc
+                if (total_copied > 0) {
+                    return total_copied;
+                }
+                return -EAGAIN;
+            }
+
+            ret = wait_event_interruptible(shared_mailbox->read_queue,
+                                         !kfifo_is_empty(&shared_mailbox->fifo));
+            if (ret) {
+                // Nếu đã đọc được một phần, trả về số bytes đã đọc
+                if (total_copied > 0) {
+                    return total_copied;
+                }
+                return ret; // Signal interrupt
+            }
         }
 
-        ret = wait_event_interruptible(shared_mailbox->read_queue,
-                                     !kfifo_is_empty(&shared_mailbox->fifo));
+        // Lock FIFO để đọc dữ liệu
+        if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
+            // Nếu đã đọc được một phần, trả về số bytes đã đọc
+            if (total_copied > 0) {
+                return total_copied;
+            }
+            return -ERESTARTSYS;
+        }
+
+        // Tính số bytes còn lại cần đọc
+        remaining = len - total_copied;
+
+        // Đọc dữ liệu từ FIFO (tối đa remaining bytes)
+        ret = kfifo_to_user(&shared_mailbox->fifo, buffer + total_copied, remaining, &copied);
+
+        mutex_unlock(&shared_mailbox->fifo_mutex);
+
         if (ret) {
-            return ret; // Signal interrupt
+            // Nếu đã đọc được một phần, trả về số bytes đã đọc
+            if (total_copied > 0) {
+                return total_copied;
+            }
+            return ret;
         }
+
+        total_copied += copied;
+
+        // Wake up writer nếu có space
+        wake_up_interruptible(&shared_mailbox->write_queue);
+
+        printk(KERN_INFO "Mailbox: Read %u bytes (total so far: %zu/%zu)\n",
+               copied, total_copied, len);
     }
 
-    // Lock FIFO để đọc dữ liệu
-    if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    // Đọc dữ liệu từ FIFO
-    ret = kfifo_to_user(&shared_mailbox->fifo, buffer, len, &copied);
-
-    mutex_unlock(&shared_mailbox->fifo_mutex);
-
-    if (ret) {
-        return ret;
-    }
-
-    // Wake up writer nếu có space
-    wake_up_interruptible(&shared_mailbox->write_queue);
-
-    printk(KERN_INFO "Mailbox: Read %u bytes\n", copied);
-    return copied;
+    printk(KERN_INFO "Mailbox: Completed reading %zu bytes\n", total_copied);
+    return total_copied;
 }
 
 static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_t len, loff_t *offset)
@@ -215,7 +240,7 @@ static int __init mailbox_init(void)
     major_number = MAJOR(dev_num);
 
     // Tạo device class
-    mailbox_class = class_create(THIS_MODULE, CLASS_NAME);
+    mailbox_class = class_create( CLASS_NAME);
     if (IS_ERR(mailbox_class)) {
         ret = PTR_ERR(mailbox_class);
         goto cleanup_chrdev;
@@ -224,7 +249,7 @@ static int __init mailbox_init(void)
     // Khởi tạo các device
     for (i = 0; i < NUM_DEVICES; i++) {
         mailbox_devices[i].minor = i;
-        mailbox_devices[i].is_open = false;
+        mailbox_devices[i].open_count = 0;
         mutex_init(&mailbox_devices[i].open_mutex);
 
         // Khởi tạo cdev

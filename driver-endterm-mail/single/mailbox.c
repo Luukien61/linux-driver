@@ -215,7 +215,7 @@ static int __init mailbox_init(void)
     major_number = MAJOR(dev_num);
 
     // Tạo device class
-    mailbox_class = class_create(THIS_MODULE, CLASS_NAME);
+    mailbox_class = class_create(CLASS_NAME);
     if (IS_ERR(mailbox_class)) {
         ret = PTR_ERR(mailbox_class);
         goto cleanup_chrdev;

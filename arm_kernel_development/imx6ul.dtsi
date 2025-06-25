@@ -62,14 +62,14 @@
 			clock-frequency = <696000000>;
 			clock-latency = <61036>; /* two CLK32 periods */
 			#cooling-cells = <2>;
-			operating-points = <
+			operating-points = < // Quy định tần số (kHz) và điện áp (uV) tương ứng mà từng lõi CPU có thể chạy.
 				/* kHz	uV */
 				696000	1275000
 				528000	1175000
 				396000	1025000
 				198000	950000
 			>;
-			fsl,soc-operating-points = <
+			fsl,soc-operating-points = < // Quy định tần số và điện áp cho cả hệ thống (SoC), bao gồm CPU + các thành phần khác (GPU, Bus, RAM...).
 				/* KHz	uV */
 				696000	1275000
 				528000	1175000
