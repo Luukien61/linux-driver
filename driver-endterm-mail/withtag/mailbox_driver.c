@@ -16,6 +16,7 @@
 #define MAX_MESSAGE_SIZE 1024
 #define MAX_TAG_SIZE 32
 #define NUM_DEVICES 2
+#define DEFAULT_TAG "public"
 
 // IOCTL commands
 #define MAILBOX_IOC_MAGIC 'm'
@@ -97,12 +98,13 @@ static int mailbox_open(struct inode *inode, struct file *file)
     }
 
     dev->is_open = true;
-    dev->has_tag = false;
-    memset(dev->current_tag, 0, MAX_TAG_SIZE);
+    dev->has_tag = true; // Default to using public tag
+    strncpy(dev->current_tag, DEFAULT_TAG, MAX_TAG_SIZE - 1);
+    dev->current_tag[MAX_TAG_SIZE - 1] = '\0';
     file->private_data = dev;
     mutex_unlock(&dev->open_mutex);
 
-    printk(KERN_INFO "Mailbox: Device %d opened successfully\n", minor);
+    printk(KERN_INFO "Mailbox: Device %d opened successfully with default tag '%s'\n", minor, dev->current_tag);
     return 0;
 }
 
@@ -144,10 +146,11 @@ static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, 
         return 0;
     }
 
-    // Kiểm tra xem device có tag được set không
+    // Use default tag if no tag is explicitly set
     if (!dev->has_tag) {
-        printk(KERN_WARNING "Mailbox: No tag set for reading\n");
-        return -EINVAL;
+        strncpy(dev->current_tag, DEFAULT_TAG, MAX_TAG_SIZE - 1);
+        dev->current_tag[MAX_TAG_SIZE - 1] = '\0';
+        dev->has_tag = true;
     }
 
     // Chờ cho đến khi có message với tag phù hợp
@@ -216,10 +219,11 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
         return -EINVAL;
     }
 
-    // Kiểm tra xem device có tag được set không
+    // Use default tag if no tag is explicitly set
     if (!dev->has_tag) {
-        printk(KERN_WARNING "Mailbox: No tag set for writing\n");
-        return -EINVAL;
+        strncpy(dev->current_tag, DEFAULT_TAG, MAX_TAG_SIZE - 1);
+        dev->current_tag[MAX_TAG_SIZE - 1] = '\0';
+        dev->has_tag = true;
     }
 
     // Tạo message mới
@@ -286,8 +290,8 @@ static long mailbox_ioctl(struct file *file, unsigned int cmd, unsigned long arg
     case MAILBOX_IOC_GET_TAG:
         mutex_lock(&dev->open_mutex);
         if (!dev->has_tag) {
-            mutex_unlock(&dev->open_mutex);
-            return -ENODATA;
+            strncpy(dev->current_tag, DEFAULT_TAG, MAX_TAG_SIZE - 1);
+            dev->current_tag[MAX_TAG_SIZE - 1] = '\0';
         }
         if (copy_to_user((char __user *)arg, dev->current_tag, strlen(dev->current_tag) + 1)) {
             mutex_unlock(&dev->open_mutex);
@@ -298,10 +302,11 @@ static long mailbox_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 
     case MAILBOX_IOC_CLEAR_TAG:
         mutex_lock(&dev->open_mutex);
-        dev->has_tag = false;
-        memset(dev->current_tag, 0, MAX_TAG_SIZE);
+        dev->has_tag = true; // Revert to default tag
+        strncpy(dev->current_tag, DEFAULT_TAG, MAX_TAG_SIZE - 1);
+        dev->current_tag[MAX_TAG_SIZE - 1] = '\0';
         mutex_unlock(&dev->open_mutex);
-        printk(KERN_INFO "Mailbox: Cleared tag for device %d\n", dev->minor);
+        printk(KERN_INFO "Mailbox: Reset tag to default '%s' for device %d\n", dev->current_tag, dev->minor);
         break;
 
     default:
