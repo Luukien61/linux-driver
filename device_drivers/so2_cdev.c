@@ -1,299 +1,245 @@
+/*
+ * Character device drivers lab
+ *
+ * All tasks
+ */
+
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
-#include <linux/device.h>
 #include <linux/uaccess.h>
-#include <linux/slab.h>
-#include <linux/mutex.h>
-#include <linux/wait.h>
 #include <linux/sched.h>
-#include <linux/kfifo.h>
+#include <linux/wait.h>
+#include <linux/atomic.h>
 
-#define DEVICE_NAME "mailbox"
-#define CLASS_NAME "mailbox_class"
-#define MAILBOX_SIZE 1024
-#define NUM_DEVICES 2
+#include "../include/so2_cdev.h"
 
-// Device structure
-struct mailbox_dev {
-    struct cdev cdev;
-    struct device *device;
-    int minor;
-    bool is_open;
-    struct mutex open_mutex;
+MODULE_DESCRIPTION("SO2 character device");
+MODULE_AUTHOR("SO2");
+MODULE_LICENSE("GPL");
+
+#define LOG_LEVEL	KERN_INFO
+
+#define MY_MAJOR 42
+#define MY_MINOR 0
+#define NUM_MINORS 1
+#define MODULE_NAME "so2_cdev"
+#define MESSAGE "hello\n"
+#define IOCTL_MESSAGE "Hello ioctl\n"
+
+#ifndef BUFSIZ
+#define BUFSIZ 4096
+#endif
+
+struct so2_device_data {
+    struct cdev cdev;           // TODO 2: add cdev member
+    char buffer[BUFSIZ];        // TODO 4: add buffer
+    atomic_t access;            // TODO 3: add atomic_t access variable
+    wait_queue_head_t queue;
+    int is_blocked;
 };
 
-// Shared mailbox structure
-struct mailbox_data {
-    struct kfifo fifo;
-    struct mutex fifo_mutex;
-    wait_queue_head_t read_queue;
-    wait_queue_head_t write_queue;
-};
+struct so2_device_data devs[NUM_MINORS];
 
-static int major_number;
-static struct class *mailbox_class = NULL;
-static struct mailbox_dev mailbox_devices[NUM_DEVICES];
-static struct mailbox_data *shared_mailbox;
-
-// Function prototypes
-static int mailbox_open(struct inode *inode, struct file *file);
-static int mailbox_release(struct inode *inode, struct file *file);
-static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, loff_t *offset);
-static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_t len, loff_t *offset);
-
-static struct file_operations fops = {
-    .open = mailbox_open,
-    .release = mailbox_release,
-    .read = mailbox_read,
-    .write = mailbox_write,
-    .owner = THIS_MODULE,
-};
-
-static int mailbox_open(struct inode *inode, struct file *file)
+static int so2_cdev_open(struct inode *inode, struct file *file)
 {
-    struct mailbox_dev *dev;
-    int minor = iminor(inode);
+    struct so2_device_data *data;
+    /* TODO 2: print message when the device file is open. */
+    pr_info("%s: Device opened\n", MODULE_NAME);
 
-    printk(KERN_INFO "Mailbox: Attempting to open device %d\n", minor);
+    /* TODO 3: inode->i_cdev contains our cdev struct, use container_of to obtain a pointer to so2_device_data */
+    data = container_of(inode->i_cdev, struct so2_device_data, cdev);
+    file->private_data = data;
 
-    if (minor >= NUM_DEVICES) {
-        return -ENODEV;
-    }
-
-    dev = &mailbox_devices[minor];
-
-    // Lock để kiểm tra và set trạng thái open
-    if (mutex_lock_interruptible(&dev->open_mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    if (dev->is_open) {
-        mutex_unlock(&dev->open_mutex);
-        printk(KERN_WARNING "Mailbox: Device %d already open\n", minor);
+    // TODO 3: Check if device is already opened
+    if (atomic_cmpxchg(&data->access, 0, 1)) {
+        pr_info("%s: Device already in use\n", MODULE_NAME);
         return -EBUSY;
     }
 
-    dev->is_open = true;
-    file->private_data = dev;
-    mutex_unlock(&dev->open_mutex);
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule_timeout(10 * HZ);
 
-    printk(KERN_INFO "Mailbox: Device %d opened successfully\n", minor);
     return 0;
 }
 
-static int mailbox_release(struct inode *inode, struct file *file)
+static int so2_cdev_release(struct inode *inode, struct file *file)
 {
-    struct mailbox_dev *dev = file->private_data;
+    struct so2_device_data *data =
+        (struct so2_device_data *) file->private_data;
 
-    mutex_lock(&dev->open_mutex);
-    dev->is_open = false;
-    mutex_unlock(&dev->open_mutex);
+    /* TODO 2: print message when the device file is closed. */
+    pr_info("%s: Device closed\n", MODULE_NAME);
 
-    printk(KERN_INFO "Mailbox: Device %d closed\n", dev->minor);
+    // TODO 3: Reset access variable
+    atomic_set(&data->access, 0);
+
     return 0;
 }
 
-static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, loff_t *offset)
+static ssize_t so2_cdev_read(struct file *file,
+                            char __user *user_buffer,
+                            size_t size, loff_t *offset)
 {
-    int ret;
-    unsigned int copied;
+    struct so2_device_data *data =
+        (struct so2_device_data *) file->private_data;
+    size_t to_read;
 
-    if (len == 0) {
-        return 0;
-    }
-
-    // Chờ cho đến khi có dữ liệu trong FIFO
-    while (kfifo_is_empty(&shared_mailbox->fifo)) {
-        if (file->f_flags & O_NONBLOCK) {
+	if (file->f_flags & O_NONBLOCK) {
+            pr_info("%s: No data available, returning -EAGAIN\n", MODULE_NAME);
             return -EAGAIN;
         }
 
-        ret = wait_event_interruptible(shared_mailbox->read_queue,
-                                     !kfifo_is_empty(&shared_mailbox->fifo));
-        if (ret) {
-            return ret; // Signal interrupt
-        }
+
+    /* TODO 4: Copy data->buffer to user_buffer, use copy_to_user */
+    to_read = min(size, (size_t)(BUFSIZ - *offset));
+    if (to_read <= 0)
+        return 0;
+
+    if (copy_to_user(user_buffer, data->buffer + *offset, to_read)) {
+        pr_info("%s: copy_to_user failed\n", MODULE_NAME);
+        return -EFAULT;
     }
 
-    // Lock FIFO để đọc dữ liệu
-    if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    // Đọc dữ liệu từ FIFO
-    ret = kfifo_to_user(&shared_mailbox->fifo, buffer, len, &copied);
-
-    mutex_unlock(&shared_mailbox->fifo_mutex);
-
-    if (ret) {
-        return ret;
-    }
-
-    // Wake up writer nếu có space
-    wake_up_interruptible(&shared_mailbox->write_queue);
-
-    printk(KERN_INFO "Mailbox: Read %u bytes\n", copied);
-    return copied;
+    *offset += to_read;
+    return to_read;
 }
 
-static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_t len, loff_t *offset)
+static ssize_t so2_cdev_write(struct file *file,
+                             const char __user *user_buffer,
+                             size_t size, loff_t *offset)
 {
-    int ret;
-    unsigned int copied;
+    struct so2_device_data *data =
+        (struct so2_device_data *) file->private_data;
 
-    if (len == 0) {
+    /* TODO 5: copy user_buffer to data->buffer, use copy_from_user */
+    size = min(size, (size_t)(BUFSIZ - *offset));
+    if(size< 0){
         return 0;
     }
-
-    // Chờ cho đến khi có space trong FIFO
-    while (kfifo_avail(&shared_mailbox->fifo) < len) {
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
-        }
-
-        ret = wait_event_interruptible(shared_mailbox->write_queue,
-                                     kfifo_avail(&shared_mailbox->fifo) >= len);
-        if (ret) {
-            return ret; // Signal interrupt
-        }
+    if (copy_from_user(data->buffer + *offset, user_buffer, size)) {
+        pr_info("%s: copy_from_user failed\n", MODULE_NAME);
+        return -EFAULT;
     }
 
-    // Lock FIFO để ghi dữ liệu
-    if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    // Ghi dữ liệu vào FIFO
-    ret = kfifo_from_user(&shared_mailbox->fifo, buffer, len, &copied);
-
-    mutex_unlock(&shared_mailbox->fifo_mutex);
-
-    if (ret) {
-        return ret;
-    }
-
-    // Wake up reader
-    wake_up_interruptible(&shared_mailbox->read_queue);
-
-    printk(KERN_INFO "Mailbox: Written %u bytes\n", copied);
-    return copied;
+    *offset += size;
+    return size;
 }
 
-static int __init mailbox_init(void)
+static long so2_cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-    int ret, i;
-    dev_t dev_num;
+    struct so2_device_data *data =
+        (struct so2_device_data *) file->private_data;
+    int ret = 0;
+	char __user *user_buffer = NULL;
 
-    printk(KERN_INFO "Mailbox: Initializing mailbox driver\n");
-
-    // Cấp phát shared mailbox
-    shared_mailbox = kmalloc(sizeof(struct mailbox_data), GFP_KERNEL);
-    if (!shared_mailbox) {
-        return -ENOMEM;
-    }
-
-    // Khởi tạo KFIFO
-    ret = kfifo_alloc(&shared_mailbox->fifo, MAILBOX_SIZE, GFP_KERNEL);
-    if (ret) {
-        kfree(shared_mailbox);
-        return ret;
-    }
-
-    // Khởi tạo mutex và wait queue
-    mutex_init(&shared_mailbox->fifo_mutex);
-    init_waitqueue_head(&shared_mailbox->read_queue);
-    init_waitqueue_head(&shared_mailbox->write_queue);
-
-    // Cấp phát major number
-    ret = alloc_chrdev_region(&dev_num, 0, NUM_DEVICES, DEVICE_NAME);
-    if (ret < 0) {
-        printk(KERN_ALERT "Mailbox: Failed to allocate major number\n");
-        goto cleanup_fifo;
-    }
-    major_number = MAJOR(dev_num);
-
-    // Tạo device class
-    mailbox_class = class_create(THIS_MODULE, CLASS_NAME);
-    if (IS_ERR(mailbox_class)) {
-        ret = PTR_ERR(mailbox_class);
-        goto cleanup_chrdev;
-    }
-
-    // Khởi tạo các device
-    for (i = 0; i < NUM_DEVICES; i++) {
-        mailbox_devices[i].minor = i;
-        mailbox_devices[i].is_open = false;
-        mutex_init(&mailbox_devices[i].open_mutex);
-
-        // Khởi tạo cdev
-        cdev_init(&mailbox_devices[i].cdev, &fops);
-        mailbox_devices[i].cdev.owner = THIS_MODULE;
-
-        ret = cdev_add(&mailbox_devices[i].cdev, MKDEV(major_number, i), 1);
-        if (ret) {
-            printk(KERN_ALERT "Mailbox: Failed to add cdev %d\n", i);
-            goto cleanup_devices;
+    /* TODO 6: if cmd = MY_IOCTL_PRINT, display IOCTL_MESSAGE */
+    switch (cmd) {
+    case MY_IOCTL_PRINT:
+        pr_info("%s: %s", MODULE_NAME, IOCTL_MESSAGE);
+        break;
+    case MY_IOCTL_SET_BUFFER: {
+        char userBuffer[BUFSIZ];
+        if (copy_from_user(userBuffer, (void __user *)arg, sizeof(userBuffer))) {
+            pr_info("%s: copy_from_user failed\n", MODULE_NAME);
+            return -EFAULT;
         }
+        strncpy(data->buffer, userBuffer, BUFSIZ);
+        break;
+    }
 
-        // Tạo device file
-        mailbox_devices[i].device = device_create(mailbox_class, NULL,
-                                                MKDEV(major_number, i), NULL,
-                                                "mailbox%d", i);
-        if (IS_ERR(mailbox_devices[i].device)) {
-            ret = PTR_ERR(mailbox_devices[i].device);
-            cdev_del(&mailbox_devices[i].cdev);
-            goto cleanup_devices;
+    case MY_IOCTL_GET_BUFFER: {
+        if (copy_to_user((void __user *)arg, data->buffer, strlen(data->buffer)+1)) {
+            pr_info("%s: copy_to_user failed\n", MODULE_NAME);
+            return -EFAULT;
         }
+        break;
     }
-
-    printk(KERN_INFO "Mailbox: Driver initialized with major number %d\n", major_number);
-    return 0;
-
-cleanup_devices:
-    for (i--; i >= 0; i--) {
-        device_destroy(mailbox_class, MKDEV(major_number, i));
-        cdev_del(&mailbox_devices[i].cdev);
+    case MY_IOCTL_DOWN:
+            pr_info("%s: Process %d added to queue\n", MODULE_NAME, current->pid);
+            data->is_blocked = 1;
+            wait_event_interruptible(data->queue, !data->is_blocked);
+            pr_info("%s: Process %d woken up\n", MODULE_NAME, current->pid);
+            break;
+    case MY_IOCTL_UP:
+            pr_info("%s: Waking up all processes in queue\n", MODULE_NAME);
+            data->is_blocked = 0;
+            wake_up_interruptible(&data->queue);
+            break;
+    default:
+        ret = -EINVAL;
     }
-    class_destroy(mailbox_class);
-
-cleanup_chrdev:
-    unregister_chrdev_region(MKDEV(major_number, 0), NUM_DEVICES);
-
-cleanup_fifo:
-    kfifo_free(&shared_mailbox->fifo);
-    kfree(shared_mailbox);
 
     return ret;
 }
 
-static void __exit mailbox_exit(void)
+static const struct file_operations so2_fops = {
+    .owner = THIS_MODULE,
+    .open = so2_cdev_open,      // TODO 2
+    .release = so2_cdev_release, // TODO 2
+    .read = so2_cdev_read,      // TODO 4
+    .write = so2_cdev_write,    // TODO 5
+    .unlocked_ioctl = so2_cdev_ioctl, // TODO 6
+};
+
+static int so2_cdev_init(void)
+{
+    int err;
+    int i;
+
+    // TODO 1: Register char device region
+    err = register_chrdev_region(MKDEV(MY_MAJOR, MY_MINOR), NUM_MINORS, MODULE_NAME);
+    if (err!=0) {
+        pr_info("%s: register_chrdev_region failed\n", MODULE_NAME);
+        return err;
+    }
+        pr_info("%s: Registered character device with major %d\n", MODULE_NAME, MY_MAJOR);
+
+    for (i = 0; i < NUM_MINORS; i++) {
+
+        init_waitqueue_head(&devs[i].queue);
+        devs[i].is_blocked = 0;
+        // TODO 4: Initialize buffer
+        strncpy(devs[i].buffer, MESSAGE, BUFSIZ);
+
+        // TODO 3: Initialize access variable
+        atomic_set(&devs[i].access, 0);
+
+        // TODO 2: Initialize and add cdev
+        cdev_init(&devs[i].cdev, &so2_fops);
+
+        err = cdev_add(&devs[i].cdev, MKDEV(MY_MAJOR, MY_MINOR + i), 1);
+        if (err) {
+            pr_info("%s: cdev_add failed for minor %d\n", MODULE_NAME, i);
+            goto cleanup;
+        }
+    }
+
+    return 0;
+
+cleanup:
+    for (i = 0; i < NUM_MINORS; i++) {
+        cdev_del(&devs[i].cdev);
+    }
+    unregister_chrdev_region(MKDEV(MY_MAJOR, MY_MINOR), NUM_MINORS);
+    return err;
+}
+
+static void so2_cdev_exit(void)
 {
     int i;
 
-    printk(KERN_INFO "Mailbox: Cleaning up mailbox driver\n");
-
-    // Cleanup devices
-    for (i = 0; i < NUM_DEVICES; i++) {
-        device_destroy(mailbox_class, MKDEV(major_number, i));
-        cdev_del(&mailbox_devices[i].cdev);
+    // TODO 2: Delete cdevs
+    for (i = 0; i < NUM_MINORS; i++) {
+        cdev_del(&devs[i].cdev);
     }
 
-    class_destroy(mailbox_class);
-    unregister_chrdev_region(MKDEV(major_number, 0), NUM_DEVICES);
-
-    // Cleanup shared mailbox
-    kfifo_free(&shared_mailbox->fifo);
-    kfree(shared_mailbox);
-
-    printk(KERN_INFO "Mailbox: Driver cleanup completed\n");
+    // TODO 1: Unregister char device region
+    unregister_chrdev_region(MKDEV(MY_MAJOR, MY_MINOR), NUM_MINORS);
+    pr_info("%s: Unregistered character device\n", MODULE_NAME);
 }
 
-module_init(mailbox_init);
-module_exit(mailbox_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Mailbox Driver");
-MODULE_DESCRIPTION("A dual-ended mailbox character device driver");
-MODULE_VERSION("1.0");
+module_init(so2_cdev_init);
+module_exit(so2_cdev_exit);

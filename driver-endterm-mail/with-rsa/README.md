@@ -6,12 +6,6 @@ sudo apt-get update
 sudo apt-get install build-essential linux-headers-$(uname -r) libssl-dev
 ```
 
-### Cài đặt dependencies (CentOS/RHEL):
-```bash
-sudo yum groupinstall "Development Tools"
-sudo yum install kernel-devel openssl-devel
-```
-
 ## 🛠️ Biên dịch và cài đặt
 
 ### 1. Biên dịch tất cả:
@@ -26,7 +20,7 @@ sudo make install
 
 ### 3. Tạo RSA key pair:
 ```bash
-./rsa_mailbox /dev/mailbox0 0 public_key.pem generate_keys
+./test_interactive /dev/mailbox0 0 public_key.pem generate_keys
 ```
 
 ## 🚀 Sử dụng
@@ -35,12 +29,12 @@ sudo make install
 
 **Terminal 1 - Writer (mã hóa):**
 ```bash
-./rsa_mailbox /dev/mailbox0 0 public_key.pem
+./test_interactive /dev/mailbox0 0 public_key.pem
 ```
 
 **Terminal 2 - Reader (giải mã):**
 ```bash
-./rsa_mailbox /dev/mailbox1 1 private_key.pem
+./test_interactive /dev/mailbox1 1 private_key.pem
 ```
 
 ### Phương án 2: Plain Text Communication
@@ -67,7 +61,7 @@ chmod +x demo.sh
 .
 ├── mailbox.c           # Kernel driver
 ├── test_interactive.c  # Plain text user program
-├── rsa_mailbox.c      # RSA encrypted user program
+├── test_interactive.c      # RSA encrypted user program
 ├── Makefile           # Build system
 ├── demo.sh           # Demo script
 └── README.md         # Documentation
@@ -116,7 +110,7 @@ sudo chmod 666 /dev/mailbox*
 ### Lỗi OpenSSL:
 ```bash
 # Kiểm tra thư viện
-ldd rsa_mailbox
+ldd test_interactive
 
 # Reinstall OpenSSL development
 sudo apt-get install --reinstall libssl-dev
@@ -127,7 +121,7 @@ sudo apt-get install --reinstall libssl-dev
 # Thêm user vào group
 sudo usermod -a -G dialout $USER
 # hoặc chạy với sudo
-sudo ./rsa_mailbox /dev/mailbox0 0 public_key.pem
+sudo ./test_interactive /dev/mailbox0 0 public_key.pem
 ```
 
 ## 🧹 Dọn dẹp

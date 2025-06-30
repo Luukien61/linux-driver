@@ -106,13 +106,7 @@ static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, 
     while (total_copied < len) {
         // Chờ cho đến khi có dữ liệu trong FIFO
         while (kfifo_is_empty(&shared_mailbox->fifo)) {
-            if (file->f_flags & O_NONBLOCK) {
-                // Nếu đã đọc được một phần, trả về số bytes đã đọc
-                if (total_copied > 0) {
-                    return total_copied;
-                }
-                return -EAGAIN;
-            }
+
 
             ret = wait_event_interruptible(shared_mailbox->read_queue,
                                          !kfifo_is_empty(&shared_mailbox->fifo));
@@ -174,9 +168,7 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
 
     // Chờ cho đến khi có space trong FIFO
     while (kfifo_avail(&shared_mailbox->fifo) < len) {
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
-        }
+
 
         ret = wait_event_interruptible(shared_mailbox->write_queue,
                                      kfifo_avail(&shared_mailbox->fifo) >= len);
@@ -240,7 +232,7 @@ static int __init mailbox_init(void)
     major_number = MAJOR(dev_num);
 
     // Tạo device class
-    mailbox_class = class_create( CLASS_NAME);
+    mailbox_class = class_create(CLASS_NAME);
     if (IS_ERR(mailbox_class)) {
         ret = PTR_ERR(mailbox_class);
         goto cleanup_chrdev;

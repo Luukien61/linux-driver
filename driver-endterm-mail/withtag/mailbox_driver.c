@@ -10,6 +10,10 @@
 #include <linux/sched.h>
 #include <linux/list.h>
 #include <linux/ioctl.h>
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Tagged Mailbox Driver");
+MODULE_DESCRIPTION("A dual-ended mailbox character device driver with tag support");
+MODULE_VERSION("2.0");
 
 #define DEVICE_NAME "mailbox"
 #define CLASS_NAME "mailbox_class"
@@ -19,7 +23,7 @@
 #define DEFAULT_TAG "public"
 
 // IOCTL commands
-#define MAILBOX_IOC_MAGIC 'm'
+#define MAILBOX_IOC_MAGIC 'm' // a unique identifier to namespace the driver’s ioctl commands and prevent conflicts with other drivers. ensure that commands are routed to the correct driver.
 #define MAILBOX_IOC_SET_TAG _IOW(MAILBOX_IOC_MAGIC, 1, char*)
 #define MAILBOX_IOC_GET_TAG _IOR(MAILBOX_IOC_MAGIC, 2, char*)
 #define MAILBOX_IOC_CLEAR_TAG _IO(MAILBOX_IOC_MAGIC, 3)
@@ -31,6 +35,11 @@ struct tagged_message {
     char data[MAX_MESSAGE_SIZE];
     struct list_head list;
 };
+/*
+struct list_head là một cấu trúc được kernel Linux cung cấp (trong <linux/list.h>) để quản lý danh sách liên kết đôi.
+Nó chứa hai con trỏ (next và prev) để liên kết các phần tử trong danh sách.
+trường list được sử dụng để liên kết các thông điệp với nhau trong danh sách shared_mailbox->message_list.
+*/
 
 // Device structure
 struct mailbox_dev {
@@ -126,7 +135,7 @@ static int mailbox_release(struct inode *inode, struct file *file)
 static struct tagged_message *find_message_by_tag(const char *tag)
 {
     struct tagged_message *msg;
-
+    // list: Đây là tên của trường (field) trong cấu trúc struct tagged_message có kiểu struct list_head. Nó được sử dụng để liên kết các phần tử trong danh sách liên kết đôi.
     list_for_each_entry(msg, &shared_mailbox->message_list, list) {
         if (strcmp(msg->tag, tag) == 0) {
             return msg;
@@ -138,7 +147,7 @@ static struct tagged_message *find_message_by_tag(const char *tag)
 static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, loff_t *offset)
 {
     struct mailbox_dev *dev = file->private_data;
-    struct tagged_message *msg;
+    struct tagged_message *msg = NULL;
     ssize_t bytes_to_copy;
     int ret;
 
@@ -170,22 +179,33 @@ static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, 
 
         mutex_unlock(&shared_mailbox->list_mutex);
 
-        // Không tìm thấy message phù hợp
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
-        }
-
+        // Chờ cho đến khi có message với tag phù hợp
         ret = wait_event_interruptible(shared_mailbox->read_queue, ({
+            struct tagged_message *tmp_msg = NULL;
             int found = 0;
             if (!mutex_lock_interruptible(&shared_mailbox->list_mutex)) {
-                found = (find_message_by_tag(dev->current_tag) != NULL);
+                tmp_msg = find_message_by_tag(dev->current_tag);
+                if (tmp_msg) {
+                    // Lưu message và xóa khỏi danh sách
+                    list_del(&tmp_msg->list);
+                    shared_mailbox->message_count--;
+                    found = 1;
+                }
                 mutex_unlock(&shared_mailbox->list_mutex);
+            }
+            if (found) {
+                msg = tmp_msg; // Lưu con trỏ msg để sử dụng sau khi được đánh thức
             }
             found;
         }));
 
         if (ret) {
             return ret; // Signal interrupt
+        }
+
+        if (msg) {
+            // Đã có message từ điều kiện chờ, không cần tìm lại
+            break;
         }
     }
 
@@ -209,7 +229,7 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
 {
     struct mailbox_dev *dev = file->private_data;
     struct tagged_message *msg;
-    int ret;
+
 
     if (len == 0) {
         return 0;
@@ -247,7 +267,10 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
         kfree(msg);
         return -ERESTARTSYS;
     }
-
+    /*
+    Hàm list_add_tail chèn phần tử msg->list vào cuối danh sách liên kết đôi shared_mailbox->message_list.
+    Nó cập nhật các con trỏ next và prev của phần tử mới (msg->list) và phần tử cuối cùng hiện tại của danh sách để duy trì cấu trúc danh sách liên kết đôi.
+    */
     list_add_tail(&msg->list, &shared_mailbox->message_list);
     shared_mailbox->message_count++;
 
@@ -433,7 +456,3 @@ static void __exit mailbox_exit(void)
 module_init(mailbox_init);
 module_exit(mailbox_exit);
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Tagged Mailbox Driver");
-MODULE_DESCRIPTION("A dual-ended mailbox character device driver with tag support");
-MODULE_VERSION("2.0");

@@ -19,7 +19,7 @@ install:
 
 # Remove module
 remove:
-	sudo rmmod mailbox
+	sudo rmmod mailbox_driver
 
 # Show device info
 info:

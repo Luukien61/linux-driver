@@ -106,15 +106,23 @@ int receive_message(int fd) {
     char input[64];
     int bytes_to_read;
 
-    printf("Enter number of bytes to receive (max %d): ", MAX_MESSAGE_SIZE - 1);
+    printf("Enter number of bytes to receive (max %d, press Enter for max): ", MAX_MESSAGE_SIZE - 1);
     if (!fgets(input, sizeof(input), stdin)) {
         return -1;
     }
 
-    bytes_to_read = atoi(input);
-    if (bytes_to_read <= 0 || bytes_to_read >= MAX_MESSAGE_SIZE) {
-        printf("Invalid number of bytes\n");
-        return -1;
+    // Remove newline
+    input[strcspn(input, "\n")] = '\0';
+
+    // Check if input is empty (user pressed Enter)
+    if (strlen(input) == 0) {
+        bytes_to_read = MAX_MESSAGE_SIZE - 1; // Read maximum possible bytes
+    } else {
+        bytes_to_read = atoi(input);
+        if (bytes_to_read <= 0 || bytes_to_read >= MAX_MESSAGE_SIZE) {
+            printf("Invalid number of bytes\n");
+            return -1;
+        }
     }
 
     printf("Waiting for message (may block)...\n");

@@ -9,6 +9,10 @@
 #include <linux/wait.h>
 #include <linux/sched.h>
 #include <linux/kfifo.h>
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Mailbox Driver");
+MODULE_DESCRIPTION("A dual-ended mailbox character device driver");
+MODULE_VERSION("1.0");
 
 #define DEVICE_NAME "mailbox"
 #define CLASS_NAME "mailbox_class"
@@ -17,19 +21,19 @@
 
 // Device structure
 struct mailbox_dev {
-    struct cdev cdev;
-    struct device *device;
-    int minor;
-    bool is_open;
-    struct mutex open_mutex;
+    struct cdev cdev; //Character device structure.
+    struct device *device; // Device structure for /sys/class and /dev entries.
+    int minor; // Minor number to identify the device (0 or 1).
+    bool is_open; // Flag to track if the device is already opened.
+    struct mutex open_mutex; // Mutex to synchronize access to the is_open flag.
 };
 
 // Shared mailbox structure
 struct mailbox_data {
-    struct kfifo fifo;
-    struct mutex fifo_mutex;
+    struct kfifo fifo; // Kernel FIFO buffer for storing data.
+    struct mutex fifo_mutex; // Mutex to protect access to the FIFO.
     wait_queue_head_t read_queue;
-    wait_queue_head_t write_queue;
+    wait_queue_head_t write_queue; // Wait queues for blocking reads and writes when the FIFO is empty or full.
 };
 
 static int major_number;
@@ -51,10 +55,15 @@ static struct file_operations fops = {
     .owner = THIS_MODULE,
 };
 
+// This function is invoked when a user-space process calls open() on a device file open("/dev/mailbox0", O_RDWR).
 static int mailbox_open(struct inode *inode, struct file *file)
 {
     struct mailbox_dev *dev;
     int minor = iminor(inode);
+    /*
+    Extracts the minor number from the inode using the iminor macro.
+    The minor number identifies which device is being opened (0 for mailbox0, 1 for mailbox1).
+    */
 
     printk(KERN_INFO "Mailbox: Attempting to open device %d\n", minor);
 
@@ -64,7 +73,11 @@ static int mailbox_open(struct inode *inode, struct file *file)
 
     dev = &mailbox_devices[minor];
 
-    // Lock để kiểm tra và set trạng thái open
+    /*
+    mutex_lock_interruptible locks the mutex but allows the operation to be interrupted by signals (if the user presses Ctrl+C).
+    If the mutex is already locked, the calling process waits until it’s available.
+    If interrupted by a signal, it returns -ERESTARTSYS, indicating that the system call should be restarted or an error returned to user-space.
+    */
     if (mutex_lock_interruptible(&dev->open_mutex)) {
         return -ERESTARTSYS;
     }
@@ -99,43 +112,72 @@ static ssize_t mailbox_read(struct file *file, char __user *buffer, size_t len, 
 {
     int ret;
     unsigned int copied;
+    size_t total_copied = 0;
+    size_t remaining = len;
 
     if (len == 0) {
         return 0;
     }
 
-    // Chờ cho đến khi có dữ liệu trong FIFO
-    while (kfifo_is_empty(&shared_mailbox->fifo)) {
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
+    // Đọc cho đến khi có đủ len bytes hoặc bị interrupt
+    while (total_copied < len) {
+        // Chờ cho đến khi có dữ liệu trong FIFO
+        while (kfifo_is_empty(&shared_mailbox->fifo)) {
+            /*
+            wait_event_interruptible puts the process to sleep until the condition is true or a signal interrupts it.
+            */
+            ret = wait_event_interruptible(shared_mailbox->read_queue,
+                                         !kfifo_is_empty(&shared_mailbox->fifo));
+            if (ret) {
+                // Nếu đã đọc được một phần, trả về số bytes đã đọc
+                if (total_copied > 0) {
+                    return total_copied;
+                }
+                return ret; // Signal interrupt
+            }
         }
 
-        ret = wait_event_interruptible(shared_mailbox->read_queue,
-                                     !kfifo_is_empty(&shared_mailbox->fifo));
+        // Lock FIFO để đọc dữ liệu
+        if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
+            // Nếu đã đọc được một phần, trả về số bytes đã đọc
+            if (total_copied > 0) {
+                return total_copied;
+            }
+            return -ERESTARTSYS;
+        }
+
+        // Tính số bytes còn lại cần đọc
+        remaining = len - total_copied;
+
+        // Đọc dữ liệu từ FIFO (tối đa remaining bytes)
+        ret = kfifo_to_user(&shared_mailbox->fifo, buffer + total_copied, remaining, &copied);
+
+        mutex_unlock(&shared_mailbox->fifo_mutex);
+
         if (ret) {
-            return ret; // Signal interrupt
+            // Nếu đã đọc được một phần, trả về số bytes đã đọc
+            if (total_copied > 0) {
+                return total_copied;
+            }
+            return ret;
         }
+
+        total_copied += copied;
+
+        // Wake up writer nếu có space
+        /*
+        Wakes up all processes waiting on shared_mailbox->write_queue.
+        These are processes that called mailbox_write but were put to sleep because the FIFO lacked enough space (kfifo_avail(&shared_mailbox->fifo) < len).
+        Without these calls, blocked processes would never wake up, causing deadlocks or requiring inefficient polling.
+        */
+        wake_up_interruptible(&shared_mailbox->write_queue);
+
+        printk(KERN_INFO "Mailbox: Read %u bytes (total so far: %zu/%zu)\n",
+               copied, total_copied, len);
     }
 
-    // Lock FIFO để đọc dữ liệu
-    if (mutex_lock_interruptible(&shared_mailbox->fifo_mutex)) {
-        return -ERESTARTSYS;
-    }
-
-    // Đọc dữ liệu từ FIFO
-    ret = kfifo_to_user(&shared_mailbox->fifo, buffer, len, &copied);
-
-    mutex_unlock(&shared_mailbox->fifo_mutex);
-
-    if (ret) {
-        return ret;
-    }
-
-    // Wake up writer nếu có space
-    wake_up_interruptible(&shared_mailbox->write_queue);
-
-    printk(KERN_INFO "Mailbox: Read %u bytes\n", copied);
-    return copied;
+    printk(KERN_INFO "Mailbox: Completed reading %zu bytes\n", total_copied);
+    return total_copied;
 }
 
 static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_t len, loff_t *offset)
@@ -148,11 +190,12 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
     }
 
     // Chờ cho đến khi có space trong FIFO
+    // Uses kfifo_avail to check if the FIFO has enough free space for len bytes.
     while (kfifo_avail(&shared_mailbox->fifo) < len) {
-        if (file->f_flags & O_NONBLOCK) {
-            return -EAGAIN;
-        }
 
+        /*
+        This adds the process to shared_mailbox->write_queue and puts it to sleep until the FIFO has at least len bytes of free space.
+        */
         ret = wait_event_interruptible(shared_mailbox->write_queue,
                                      kfifo_avail(&shared_mailbox->fifo) >= len);
         if (ret) {
@@ -175,6 +218,11 @@ static ssize_t mailbox_write(struct file *file, const char __user *buffer, size_
     }
 
     // Wake up reader
+    /*
+    After mailbox_write adds data to the FIFO, wake_up_interruptible(&shared_mailbox->read_queue)
+    signals all processes in the read_queue to wake up. These processes then recheck the condition
+    (!kfifo_is_empty) and proceed to read the newly available data if the condition is true.
+    */
     wake_up_interruptible(&shared_mailbox->read_queue);
 
     printk(KERN_INFO "Mailbox: Written %u bytes\n", copied);
@@ -207,7 +255,14 @@ static int __init mailbox_init(void)
     init_waitqueue_head(&shared_mailbox->write_queue);
 
     // Cấp phát major number
-    ret = alloc_chrdev_region(&dev_num, 0, NUM_DEVICES, DEVICE_NAME);
+    ret = alloc_chrdev_region(&dev_num, 0, NUM_DEVICES, DEVICE_NAME); // allow kernel automatcally allocate the device major number instead of pre-defined.
+    /*
+    0: The starting minor number for the range
+    NUM_DEVICES: The number of minor numbers to allocate
+    The kernel finds an unused major number and assigns it to the device.
+    The allocated major and minor numbers are stored in dev_num. The major number can later be extracted using MAJOR(dev_num)
+    */
+
     if (ret < 0) {
         printk(KERN_ALERT "Mailbox: Failed to allocate major number\n");
         goto cleanup_fifo;
@@ -215,6 +270,10 @@ static int __init mailbox_init(void)
     major_number = MAJOR(dev_num);
 
     // Tạo device class
+    /*
+    Creates a device class named CLASS_NAME (defined as "mailbox_class") under /sys/class/.
+    This class is a kernel abstraction that groups related devices and provides a way to manage their properties and device nodes.
+    */
     mailbox_class = class_create(CLASS_NAME);
     if (IS_ERR(mailbox_class)) {
         ret = PTR_ERR(mailbox_class);
@@ -228,16 +287,31 @@ static int __init mailbox_init(void)
         mutex_init(&mailbox_devices[i].open_mutex);
 
         // Khởi tạo cdev
+        // Initializes the character device structure (cdev) for the i-th device, associating it with the file operations (fops) defined earlier.
         cdev_init(&mailbox_devices[i].cdev, &fops);
         mailbox_devices[i].cdev.owner = THIS_MODULE;
 
         ret = cdev_add(&mailbox_devices[i].cdev, MKDEV(major_number, i), 1);
+        /*
+        Registers the character device with the kernel,
+        associating it with a specific device number (major number from major_number, minor number i) and a count of 1 (one device per minor number).
+        The 1 indicates that this cdev corresponds to exactly one device number
+        */
         if (ret) {
             printk(KERN_ALERT "Mailbox: Failed to add cdev %d\n", i);
             goto cleanup_devices;
         }
 
-        // Tạo device file
+        /*
+        This creates the device files in /dev that user-space applications can open, read from, or write to.
+        It also creates sysfs entries for device management (e.g., /sys/class/mailbox_class/mailbox0).
+        mailbox_class: The device class created earlier, associating the device with /sys/class/mailbox_class.
+        NULL: The parent device (none in this case, as these are virtual character devices).
+        MKDEV(major_number, i): The device number (major number and minor number i).
+        NULL: No additional driver data (can be used to pass custom data to the device).
+        "mailbox%d", i: The format string for the device name, creating /dev/mailbox0 and /dev/mailbox1.
+        with this macro, there is no need to call mknod in userspace.
+        */
         mailbox_devices[i].device = device_create(mailbox_class, NULL,
                                                 MKDEV(major_number, i), NULL,
                                                 "mailbox%d", i);
@@ -293,7 +367,3 @@ static void __exit mailbox_exit(void)
 module_init(mailbox_init);
 module_exit(mailbox_exit);
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Mailbox Driver");
-MODULE_DESCRIPTION("A dual-ended mailbox character device driver");
-MODULE_VERSION("1.0");
